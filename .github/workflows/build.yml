@@ -30,23 +30,35 @@ jobs:
           chmod +x ./downloadFrameworks.sh
           ./downloadFrameworks.sh
 
-      # 3. 【iOS 18 专属降级 + 源码级协议补丁】将全线依赖拉高至 iOS 18.0 基线
+      # 3. 【iOS 18 强力源码修补】外科手术式解决 UITextSearchingHelper 代理报错
       - name: Deep Patch Workspace
         run: |
-          echo "==== 开始对所有工程文件进行地毯式降级 (iOS 18 适配版) ===="
+          echo "==== 开始对所有工程文件进行地毯式降级 (iOS 18 终极修复版) ===="
           
-          # 1. 精准修复 Runestone 库中因为最低支持版本冲突导致的 UIFindInteraction 报错
+          # 1. 针对 UITextSearchingHelper.swift 报错进行精准的源码重写
+          # 找到那个报错的文件，并强制在其类定义或扩展的前面，以及方法上方硬编码塞入编译通过标记
+          find . -name "UITextSearchingHelper.swift" | while read -r swift_file; do
+            echo "🎯 正在对关键文件进行外科手术式源码修补: $swift_file"
+            
+            # 使用 sed 强行在文件中所有涉及该协议或者方法的地方，用 #if available 宏整体包裹
+            # 或者直接在文件最顶部声明全局忽略低版本兼容
+            sed -i '' '1i\
+            import UIKit\
+            ' "$swift_file" || true
+            
+            # 精准定位到协议实现的方法，把它的上一行直接替换为无视版本的守护宏
+            sed -i '' 's/func findInteraction(_ interaction: UIFindInteraction, sessionFor view: UIView)/@available(iOS 16.0, *)\n    func findInteraction(_ interaction: UIFindInteraction, sessionFor view: UIView)/g' "$swift_file" || true
+          done
+
+          # 2. 对其他可能包含该方法的 Runestone 源码进行批量硬核打补丁
           find . -name "TreeSitterLanguageMode.swift" -o -name "*Find*.swift" -o -name "*TextView*.swift" | while read -r swift_file; do
             if grep -q "func findInteraction" "$swift_file"; then
-              echo "🎯 发现病灶源码，正在注入 iOS 18.0 版本可用性守护: $swift_file"
-              # 在目标函数上方动态插入 @available 检查，阻止编译器向下严审
-              sed -i '' '/func findInteraction(_ interaction: UIFindInteraction/i\
-              @available(iOS 18.0, *)\
-              ' "$swift_file" || true
+              echo "🎯 发现潜在病灶源码，注入可用性守护: $swift_file"
+              sed -i '' 's/func findInteraction(/@available(iOS 16.0, *)\n    func findInteraction(/g' "$swift_file" || true
             fi
           done
 
-          # 2. 修改项目配置文件
+          # 3. 修改项目配置文件，确保编译器全局认知统一
           find . -name "project.pbxproj" | while read -r pbx; do
             echo "修补配置文件: $pbx"
             sed -i '' 's/SWIFT_TREAT_WARNINGS_AS_ERRORS = YES/SWIFT_TREAT_WARNINGS_AS_ERRORS = NO/g' "$pbx" || true
@@ -54,7 +66,7 @@ jobs:
             sed -i '' 's/SWIFT_STRICT_CONCURRENCY = "complete"/SWIFT_STRICT_CONCURRENCY = "none"/g' "$pbx" || true
             sed -i '' 's/OTHER_SWIFT_FLAGS = "/OTHER_SWIFT_FLAGS = "-Xfrontend -disable-strict-concurrency-checking /g' "$pbx" || true
             
-            # 【核心改动】将所有主目标、Pod 和第三方库的最低支持系统硬编码锁死在 iOS 18.0
+            # 强行锁死全线目标到 iOS 18.0
             sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 18.0/g' "$pbx" || true
           done
       # 4. 【恢复纯净】xcodebuild 命令行保持干净，防止参数污染 C/C++ 依赖
