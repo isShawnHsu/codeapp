@@ -20,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 1. 安装日志美化工具（它能把隐藏在几万行列表里的 error 强行提取到最下面）
+      # 1. 安装日志美化工具
       - name: Install xcbeautify
         run: brew install xcbeautify
 
@@ -30,24 +30,28 @@ jobs:
           chmod +x ./downloadFrameworks.sh
           ./downloadFrameworks.sh
 
-      # 3. 【终极魔改】直接对 SPM 缓存和本地 project 注入全面降级配置
+      # 3. 【精准降级】用脚本把并发安全开关和警告压制直接注入 pbxproj，不破坏 C 语言编译器参数
       - name: Deep Patch Workspace
         run: |
-          echo "==== 开始对所有工程文件进行地毯式降级 ===="
+          echo "==== 开始对所有工程文件进行精准降级 ===="
           
-          # 遍历修改所有项目的 pbxproj 配置
           find . -name "project.pbxproj" | while read -r pbx; do
             echo "修补配置文件: $pbx"
-            # 关闭警告转错误
+            # 1. 全局关闭警告转错误
             sed -i '' 's/SWIFT_TREAT_WARNINGS_AS_ERRORS = YES/SWIFT_TREAT_WARNINGS_AS_ERRORS = NO/g' "$pbx" || true
-            # 强行关闭严格的隔离校验（解决新 Xcode 编译旧库的核心）
+            
+            # 2. 强行将所有目标的并发审计级别降到最低（完美解决 SwiftEmitModule 核心死锁）
             sed -i '' 's/SWIFT_STRICT_CONCURRENCY = YES/SWIFT_STRICT_CONCURRENCY = NO/g' "$pbx" || true
             sed -i '' 's/SWIFT_STRICT_CONCURRENCY = "complete"/SWIFT_STRICT_CONCURRENCY = "none"/g' "$pbx" || true
-            # 强制锁死目标版本支持
+            
+            # 3. 在所有 Release/Debug 配置块中，悄悄塞入安全的纯 Swift 降级标帜（不影响全局 Clang）
+            sed -i '' 's/OTHER_SWIFT_FLAGS = "/OTHER_SWIFT_FLAGS = "-Xfrontend -disable-strict-concurrency-checking /g' "$pbx" || true
+            
+            # 4. 强制支持老版本目标行为
             sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 16.0/g' "$pbx" || true
           done
 
-     # 4. 彻底降级 Swift 模块生成校验，修复 xcbeautify 参数错误
+      # 4. 【恢复纯净】xcodebuild 命令行保持干净，防止参数污染 C/C++ 依赖
       - name: Build with Xcode (No Signing)
         run: |
           set -o pipefail
@@ -64,21 +68,16 @@ jobs:
             COMPILER_INDEX_STORE_ENABLE=NO \
             DEBUG_INFORMATION_FORMAT=dwarf \
             VALIDATE_WORKSPACE=NO \
-            OTHER_SWIFT_FLAGS="-Xfrontend -disable-strict-concurrency-checking -Xfrontend -suppress-warnings" \
-            SWIFT_STRICT_CONCURRENCY=none \
-            SUPPRESS_WARNINGS=YES \
             | xcbeautify --is-ci
 
-      # 5. 从 Debug 归档路径动态提取并打包为标准的 .ipa
+      # 5. 从归档路径动态提取并打包为标准的 .ipa
       - name: Package to IPA
         if: success()
         run: |
           mkdir -p ./build/Payload
-          # 动态匹配 Debug 或 Release 下生成的实际 App 路径
           APP_PATH=$(find ./build/Code.xcarchive/Products/Applications -name "*.app" | head -n 1)
           echo "找到的实际 App 路径: $APP_PATH"
           
-          # 如果硬签环境下某些插件有残留的额外签名，进行强行剥离（针对 TrollStore 优化）
           if [ -d "$APP_PATH/_CodeSignature" ]; then
             rm -rf "$APP_PATH/_CodeSignature"
           fi
@@ -87,7 +86,7 @@ jobs:
           cd ./build
           zip -r Code.ipa Payload
           
-      # 6. 将最终生成的 Code.ipa 上传作为 GitHub 产物供下载
+      # 6. 将最终生成的 Code.ipa 上传作为 GitHub 产物
       - name: Upload Unsigned IPA
         if: success()
         uses: actions/upload-artifact@v4
