@@ -30,27 +30,33 @@ jobs:
           chmod +x ./downloadFrameworks.sh
           ./downloadFrameworks.sh
 
-      # 3. 【精准降级】用脚本把并发安全开关和警告压制直接注入 pbxproj，不破坏 C 语言编译器参数
+      # 3. 【iOS 18 专属降级 + 源码级协议补丁】将全线依赖拉高至 iOS 18.0 基线
       - name: Deep Patch Workspace
         run: |
-          echo "==== 开始对所有工程文件进行精准降级 ===="
+          echo "==== 开始对所有工程文件进行地毯式降级 (iOS 18 适配版) ===="
           
-          find . -name "project.pbxproj" | while read -r pbx; do
-            echo "修补配置文件: $pbx"
-            # 1. 全局关闭警告转错误
-            sed -i '' 's/SWIFT_TREAT_WARNINGS_AS_ERRORS = YES/SWIFT_TREAT_WARNINGS_AS_ERRORS = NO/g' "$pbx" || true
-            
-            # 2. 强行将所有目标的并发审计级别降到最低（完美解决 SwiftEmitModule 核心死锁）
-            sed -i '' 's/SWIFT_STRICT_CONCURRENCY = YES/SWIFT_STRICT_CONCURRENCY = NO/g' "$pbx" || true
-            sed -i '' 's/SWIFT_STRICT_CONCURRENCY = "complete"/SWIFT_STRICT_CONCURRENCY = "none"/g' "$pbx" || true
-            
-            # 3. 在所有 Release/Debug 配置块中，悄悄塞入安全的纯 Swift 降级标帜（不影响全局 Clang）
-            sed -i '' 's/OTHER_SWIFT_FLAGS = "/OTHER_SWIFT_FLAGS = "-Xfrontend -disable-strict-concurrency-checking /g' "$pbx" || true
-            
-            # 4. 强制支持老版本目标行为
-            sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 16.0/g' "$pbx" || true
+          # 1. 精准修复 Runestone 库中因为最低支持版本冲突导致的 UIFindInteraction 报错
+          find . -name "TreeSitterLanguageMode.swift" -o -name "*Find*.swift" -o -name "*TextView*.swift" | while read -r swift_file; do
+            if grep -q "func findInteraction" "$swift_file"; then
+              echo "🎯 发现病灶源码，正在注入 iOS 18.0 版本可用性守护: $swift_file"
+              # 在目标函数上方动态插入 @available 检查，阻止编译器向下严审
+              sed -i '' '/func findInteraction(_ interaction: UIFindInteraction/i\
+              @available(iOS 18.0, *)\
+              ' "$swift_file" || true
+            fi
           done
 
+          # 2. 修改项目配置文件
+          find . -name "project.pbxproj" | while read -r pbx; do
+            echo "修补配置文件: $pbx"
+            sed -i '' 's/SWIFT_TREAT_WARNINGS_AS_ERRORS = YES/SWIFT_TREAT_WARNINGS_AS_ERRORS = NO/g' "$pbx" || true
+            sed -i '' 's/SWIFT_STRICT_CONCURRENCY = YES/SWIFT_STRICT_CONCURRENCY = NO/g' "$pbx" || true
+            sed -i '' 's/SWIFT_STRICT_CONCURRENCY = "complete"/SWIFT_STRICT_CONCURRENCY = "none"/g' "$pbx" || true
+            sed -i '' 's/OTHER_SWIFT_FLAGS = "/OTHER_SWIFT_FLAGS = "-Xfrontend -disable-strict-concurrency-checking /g' "$pbx" || true
+            
+            # 【核心改动】将所有主目标、Pod 和第三方库的最低支持系统硬编码锁死在 iOS 18.0
+            sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 18.0/g' "$pbx" || true
+          done
       # 4. 【恢复纯净】xcodebuild 命令行保持干净，防止参数污染 C/C++ 依赖
       - name: Build with Xcode (No Signing)
         run: |
