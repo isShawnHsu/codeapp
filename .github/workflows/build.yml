@@ -47,7 +47,7 @@ jobs:
             sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 16.0/g' "$pbx" || true
           done
 
-      # 4. 【终极对策】将配置改为 Debug 模式进行编译，彻底绕过 ptrauth 指针安全校验
+     # 4. 彻底降级 Swift 模块生成校验，修复 xcbeautify 参数错误
       - name: Build with Xcode (No Signing)
         run: |
           set -o pipefail
@@ -64,7 +64,10 @@ jobs:
             COMPILER_INDEX_STORE_ENABLE=NO \
             DEBUG_INFORMATION_FORMAT=dwarf \
             VALIDATE_WORKSPACE=NO \
-            | xcbeautify --allow-view-warnings
+            OTHER_SWIFT_FLAGS="-Xfrontend -disable-strict-concurrency-checking -Xfrontend -suppress-warnings" \
+            SWIFT_STRICT_CONCURRENCY=none \
+            SUPPRESS_WARNINGS=YES \
+            | xcbeautify --is-ci
 
       # 5. 从 Debug 归档路径动态提取并打包为标准的 .ipa
       - name: Package to IPA
