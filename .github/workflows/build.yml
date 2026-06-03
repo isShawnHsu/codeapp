@@ -26,7 +26,7 @@ jobs:
           chmod +x ./downloadFrameworks.sh
           ./downloadFrameworks.sh
 
-      # 2. 精准锁定带空格的真实 Scheme，并加入高容错编译参数
+      # 2. 强行关闭 Xcode 新版 Explicit Modules，解决第三方混编库崩溃
       - name: Build with Xcode (No Signing)
         run: |
           xcodebuild archive \
@@ -41,7 +41,13 @@ jobs:
             PROVISIONING_PROFILE_SPECIFIER="" \
             COMPILER_INDEX_STORE_ENABLE=NO \
             DEBUG_INFORMATION_FORMAT=dwarf \
-            SWIFT_COMPILATION_MODE=wholemodule
+            SWIFT_COMPILATION_MODE=wholemodule \
+            RUN_DOCUMENTATION_COMPILER=NO \
+            VALIDATE_WORKSPACE=NO \
+            ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS=NO \
+            CLANG_ENABLE_MODULE_DEBUGGING=NO \
+            SWIFT_USE_EXPLICIT_MODULE_BUILD=NO \
+            SWIFT_ENABLE_EXPLICIT_MODULES=NO
 
       # 3. 动态提取编译生成的 .app 文件夹，规范化打包为标准 .ipa
       - name: Package to IPA
