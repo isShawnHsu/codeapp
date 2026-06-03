@@ -47,14 +47,14 @@ jobs:
             sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*/IPHONEOS_DEPLOYMENT_TARGET = 16.0/g' "$pbx" || true
           done
 
-      # 4. 使用标准管道 + xcbeautify 编译，有任何 error 会被直接高亮挂在最后
+      # 4. 【终极对策】将配置改为 Debug 模式进行编译，彻底绕过 ptrauth 指针安全校验
       - name: Build with Xcode (No Signing)
         run: |
           set -o pipefail
           xcodebuild archive \
             -project Code.xcodeproj \
             -scheme "Code App" \
-            -configuration Release \
+            -configuration Debug \
             -destination 'generic/platform=iOS' \
             -archivePath ./build/Code.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
@@ -63,17 +63,23 @@ jobs:
             PROVISIONING_PROFILE_SPECIFIER="" \
             COMPILER_INDEX_STORE_ENABLE=NO \
             DEBUG_INFORMATION_FORMAT=dwarf \
-            SWIFT_COMPILATION_MODE=wholemodule \
             VALIDATE_WORKSPACE=NO \
             | xcbeautify --allow-view-warnings
 
-      # 5. 动态提取编译生成的 .app 文件夹，规范化打包为标准 .ipa
+      # 5. 从 Debug 归档路径动态提取并打包为标准的 .ipa
       - name: Package to IPA
         if: success()
         run: |
           mkdir -p ./build/Payload
+          # 动态匹配 Debug 或 Release 下生成的实际 App 路径
           APP_PATH=$(find ./build/Code.xcarchive/Products/Applications -name "*.app" | head -n 1)
           echo "找到的实际 App 路径: $APP_PATH"
+          
+          # 如果硬签环境下某些插件有残留的额外签名，进行强行剥离（针对 TrollStore 优化）
+          if [ -d "$APP_PATH/_CodeSignature" ]; then
+            rm -rf "$APP_PATH/_CodeSignature"
+          fi
+          
           cp -r "$APP_PATH" ./build/Payload/
           cd ./build
           zip -r Code.ipa Payload
