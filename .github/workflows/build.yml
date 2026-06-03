@@ -1,15 +1,16 @@
-name: Build & Deploy to TestFlight
+name: Build & Export Unsigned IPA
 on:
   push:
     branches: [main]
+  workflow_dispatch: # 允许你在 GitHub 页面上手动点击按钮触发编译
 
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    name: Deploying to TestFlight
+  build:
+    name: Build Unsigned IPA
     runs-on: macOS-26
 
     steps:
@@ -18,31 +19,37 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Deploy iOS Beta to TestFlight via Fastlane
-        run: fastlane beta
-        env:
-          APP_STORE_CONNECT_TEAM_ID: "${{ secrets.APP_STORE_CONNECT_TEAM_ID }}"
-          DEVELOPER_APP_ID: "${{ secrets.DEVELOPER_APP_ID }}"
-          DEVELOPER_APP_IDENTIFIER: "${{ secrets.DEVELOPER_APP_IDENTIFIER }}"
-          DEVELOPER_APP_EXTENSION_IDENTIFIER: "${{ secrets.DEVELOPER_APP_EXTENSION_IDENTIFIER }}"
-          DEVELOPER_PORTAL_TEAM_ID: "${{ secrets.DEVELOPER_PORTAL_TEAM_ID }}"
-          FASTLANE_APPLE_ID: "${{ secrets.FASTLANE_APPLE_ID }}"
-          FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD: "${{ secrets.FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD }}"
-          MATCH_PASSWORD: "${{ secrets.MATCH_PASSWORD }}"
-          GIT_AUTHORIZATION: "${{ secrets.GIT_AUTHORIZATION }}"
-          PROVISIONING_PROFILE_SPECIFIER: "${{ secrets.PROVISIONING_PROFILE_SPECIFIER }}"
-          TEMP_KEYCHAIN_PASSWORD: "${{ secrets.TEMP_KEYCHAIN_PASSWORD }}"
-          TEMP_KEYCHAIN_USER: "${{ secrets.TEMP_KEYCHAIN_USER }}"
-          APPLE_KEY_ID: "${{ secrets.APPLE_KEY_ID }}"
-          APPLE_ISSUER_ID: "${{ secrets.APPLE_ISSUER_ID }}"
-          APPLE_KEY_CONTENT: "${{ secrets.APPLE_KEY_CONTENT }}"
-          JUDGE0_KEY: ""
-          JUDGE0_ENDPOINT: ""
-          DISTRIBUTE_EXTERNAL: "true"
-          XCODE_PATH: "/Applications/Xcode_26.2.app"
+      # 1. 这一步至关重要：CodeApp 有一些底层的 framework 依赖需要运行脚本提前下载
+      - name: Download Frameworks
+        run: |
+          chmod +x ./downloadFrameworks.sh
+          ./downloadFrameworks.sh
 
-      - name: Upload Artifact
+      # 2. 绕过 Fastlane，直接使用 xcodebuild 编译一个不带签名的 .app 文件夹
+      - name: Build with Xcode (No Signing)
+        run: |
+          xcodebuild archive \
+            -project Code.xcodeproj \
+            -scheme Code \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath ./build/Code.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
+
+      # 3. 把编译出的 .app 规范地打包成 TrollStore 或自签工具可以直接识别的 .ipa 文件
+      - name: Package to IPA
+        run: |
+          mkdir -p ./build/Payload
+          cp -r ./build/Code.xcarchive/Products/Applications/Code.app ./build/Payload/
+          cd ./build
+          zip -r Code.ipa Payload
+          
+      # 4. 将生成的 Code.ipa 上传到 GitHub Actions 页面供你下载
+      - name: Upload Unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: ipa-build
-          path: Code.ipa
+          name: CodeApp-TrollStore-Unsigned
+          path: ./build/Code.ipa
