@@ -28,9 +28,12 @@ jobs:
       # 2. 绕过 Fastlane，直接使用 xcodebuild 编译一个不带签名的 .app 文件夹
       - name: Build with Xcode (No Signing)
         run: |
+          # 自动列出当前目录下的所有 project 和 scheme，方便在日志中排查
+          xcodebuild -list
+          
           xcodebuild archive \
-            -project Code.xcodeproj \
-            -scheme Code \
+            -project CodeApp.xcodeproj \
+            -scheme CodeApp \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath ./build/Code.xcarchive \
