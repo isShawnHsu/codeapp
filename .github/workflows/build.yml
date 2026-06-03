@@ -25,15 +25,24 @@ jobs:
           chmod +x ./downloadFrameworks.sh
           ./downloadFrameworks.sh
 
-      # 2. 绕过 Fastlane，直接使用 xcodebuild 编译一个不带签名的 .app 文件夹
+      # 2. 自动寻找 .xcodeproj 文件并编译
       - name: Build with Xcode (No Signing)
         run: |
-          # 自动列出当前目录下的所有 project 和 scheme，方便在日志中排查
-          xcodebuild -list
+          # 1. 自动寻找当前项目下的 .xcodeproj 文件路径
+          XCODE_PROJ=$(find . -name "*.xcodeproj" | head -n 1)
+          echo "找到的工程文件路径: $XCODE_PROJ"
           
+          # 2. 获取该工程名（去掉后缀作为默认 Scheme 名）
+          PROJ_NAME=$(basename "$XCODE_PROJ" .xcodeproj)
+          echo "提取的项目名称/Scheme: $PROJ_NAME"
+          
+          # 3. 列出该工程的所有 Schemes 供日志备查
+          xcodebuild -project "$XCODE_PROJ" -list
+          
+          # 4. 执行无签名编译（自动填入找到的 project 和 scheme）
           xcodebuild archive \
-            -project CodeApp.xcodeproj \
-            -scheme CodeApp \
+            -project "$XCODE_PROJ" \
+            -scheme "$PROJ_NAME" \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath ./build/Code.xcarchive \
@@ -42,11 +51,16 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             PROVISIONING_PROFILE_SPECIFIER=""
 
-      # 3. 把编译出的 .app 规范地打包成 TrollStore 或自签工具可以直接识别的 .ipa 文件
+      # 3. 动态匹配并打包成 IPA
       - name: Package to IPA
         run: |
           mkdir -p ./build/Payload
-          cp -r ./build/Code.xcarchive/Products/Applications/Code.app ./build/Payload/
+          
+          # 自动寻找编译出来的 .app 文件夹并复制到 Payload
+          APP_PATH=$(find ./build/Code.xcarchive/Products/Applications -name "*.app" | head -n 1)
+          echo "找到的 App 路径: $APP_PATH"
+          
+          cp -r "$APP_PATH" ./build/Payload/
           cd ./build
           zip -r Code.ipa Payload
           
