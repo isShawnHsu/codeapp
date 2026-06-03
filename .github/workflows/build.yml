@@ -26,7 +26,7 @@ jobs:
           chmod +x ./downloadFrameworks.sh
           ./downloadFrameworks.sh
 
-      # 2. 使用双引号精准锁定带空格的真实 Scheme: "Code App"
+      # 2. 精准锁定带空格的真实 Scheme，并加入高容错编译参数
       - name: Build with Xcode (No Signing)
         run: |
           xcodebuild archive \
@@ -38,7 +38,10 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            PROVISIONING_PROFILE_SPECIFIER=""
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            DEBUG_INFORMATION_FORMAT=dwarf \
+            SWIFT_COMPILATION_MODE=wholemodule
 
       # 3. 动态提取编译生成的 .app 文件夹，规范化打包为标准 .ipa
       - name: Package to IPA
